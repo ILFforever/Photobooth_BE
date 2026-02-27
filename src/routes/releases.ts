@@ -14,19 +14,38 @@ router.post(
   requireAuth,
   upload.single("file"),
   async (req: AuthRequest, res: Response) => {
+    console.log("[UPLOAD] ===== Upload request received =====");
+    console.log("[UPLOAD] Request headers:", {
+      "content-type": req.get("content-type"),
+      "content-length": req.get("content-length"),
+      "user-agent": req.get("user-agent"),
+    });
+    console.log("[UPLOAD] Request body keys:", Object.keys(req.body));
+    console.log("[UPLOAD] File received:", req.file ? {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      fieldName: req.file.fieldname,
+    } : "NO FILE");
+
     const file = req.file;
     const { type, version, release_notes } = req.body;
 
+    console.log("[UPLOAD] Parsed data:", { type, version, hasReleaseNotes: !!release_notes });
+
     if (!file || !type || !version) {
+      console.log("[UPLOAD] ERROR: Missing required fields", { hasFile: !!file, hasType: !!type, hasVersion: !!version });
       res.status(400).json({ error: "Missing required fields: file, type, version" });
       return;
     }
 
     if (!["msi", "vm"].includes(type)) {
+      console.log("[UPLOAD] ERROR: Invalid type", type);
       res.status(400).json({ error: "Type must be 'msi' or 'vm'" });
       return;
     }
 
+    console.log("[UPLOAD] Checking for duplicate version...");
     // Check for duplicate version
     const existing = await db
       .collection("releases")
@@ -35,15 +54,20 @@ router.post(
       .get();
 
     if (!existing.empty) {
+      console.log("[UPLOAD] ERROR: Duplicate version found");
       res.status(409).json({ error: `Version ${version} already exists for type ${type}` });
       return;
     }
 
+    console.log("[UPLOAD] Computing file hash...");
     // Compute file hash
     const hash = crypto.createHash("sha256").update(file.buffer).digest("hex");
+    console.log("[UPLOAD] File hash:", `sha256:${hash.substring(0, 16)}...`);
 
     // Upload to GCS with progress tracking
     const fileName = `${type}/${type}-v${version}${getExtension(file.originalname)}`;
+    console.log("[UPLOAD] Target GCS file:", fileName);
+
     const gcsFile = bucket.file(fileName);
 
     // Use resumable upload with progress callback
@@ -57,21 +81,25 @@ router.post(
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
+    console.log("[UPLOAD] Starting GCS upload...");
     const fileSize = file.buffer.length;
     let bytesUploaded = 0;
 
     uploadStream.on("progress", (progress) => {
       bytesUploaded = progress.bytesWritten;
       const percent = Math.round((bytesUploaded / fileSize) * 100);
+      console.log(`[UPLOAD] Progress: ${percent}% (${bytesUploaded}/${fileSize} bytes)`);
       res.write(`data: ${JSON.stringify({ status: "progress", percent, bytesUploaded, fileSize })}\n\n`);
     });
 
     uploadStream.on("error", (err) => {
+      console.error("[UPLOAD] GCS stream error:", err);
       res.write(`data: ${JSON.stringify({ status: "error", error: err.message })}\n\n`);
       res.end();
     });
 
     uploadStream.on("finish", async () => {
+      console.log("[UPLOAD] GCS upload finished, saving to Firestore...");
       try {
         // Parse release notes
         let notes: string[] = [];
@@ -93,14 +121,17 @@ router.post(
           release_notes: notes,
           created_at: new Date(),
         });
+        console.log("[UPLOAD] Firestore document created:", docRef.id);
 
         // Delete old GCS files but keep Firestore docs for changelog history
+        console.log("[UPLOAD] Cleaning up old releases...");
         const oldReleases = await db
           .collection("releases")
           .where("type", "==", type)
           .where("version", "!=", version)
           .get();
 
+        console.log("[UPLOAD] Found", oldReleases.docs.length, "old releases to clean up");
         for (const doc of oldReleases.docs) {
           const data = doc.data();
           // Delete GCS file to save space
@@ -111,6 +142,7 @@ router.post(
           await doc.ref.update({ gcs_path: null });
         }
 
+        console.log("[UPLOAD] ===== Upload complete =====");
         res.write(`data: ${JSON.stringify({
           status: "complete",
           id: docRef.id,
@@ -121,12 +153,14 @@ router.post(
         })}\n\n`);
         res.end();
       } catch (err: any) {
-        res.write(`data: ${JSON.stringify({ status: "error", error: err.message })}\n\n`);
+        console.error("[UPLOAD] Error during finish handler:", err);
+        res.write(`data: ${JSON.stringify({ status: "error", error: err.message, stack: err.stack })}\n\n`);
         res.end();
       }
     });
 
     // Create a readable stream from the buffer and pipe to upload
+    console.log("[UPLOAD] Creating buffer stream and piping to GCS...");
     const bufferStream = new PassThrough();
     bufferStream.end(file.buffer);
     bufferStream.pipe(uploadStream);
