@@ -26,9 +26,12 @@ router.get("/latest", async (req: Request, res: Response) => {
 
   const doc = snapshot.docs[0];
   const data = doc.data();
+  // Convert Firestore Timestamp to ISO string
+  const createdAt = data.created_at?.toDate ? data.created_at.toDate().toISOString() : data.created_at;
+  const safeData = { ...data, created_at: createdAt };
   // Strip internal fields — don't expose GCS paths or URLs
-  const { gcs_path, download_url, ...safeData } = data;
-  res.json({ id: doc.id, ...safeData, has_download: !!(gcs_path || download_url) });
+  const { gcs_path, download_url, ...rest } = safeData;
+  res.json({ id: doc.id, ...rest, has_download: !!(gcs_path || download_url) });
 });
 
 // GET /api/versions?type=msi|vm&limit=10&offset=0
@@ -48,8 +51,12 @@ router.get("/", async (req: Request, res: Response) => {
   const snapshot = await query.offset(offset).limit(limit).get();
 
   const releases = snapshot.docs.map((doc) => {
-    const { gcs_path, download_url, ...safeData } = doc.data();
-    return { id: doc.id, ...safeData, has_download: !!(gcs_path || download_url) };
+    const data = doc.data();
+    // Convert Firestore Timestamp to ISO string
+    const createdAt = data.created_at?.toDate ? data.created_at.toDate().toISOString() : data.created_at;
+    const safeData = { ...data, created_at: createdAt };
+    const { gcs_path, download_url, ...rest } = safeData;
+    return { id: doc.id, ...rest, has_download: !!(gcs_path || download_url) };
   });
 
   res.json({ releases, count: releases.length });
@@ -72,10 +79,13 @@ router.get("/changelog", async (req: Request, res: Response) => {
 
   const changelog = snapshot.docs.map((doc) => {
     const data = doc.data();
+    const createdAt = data.created_at;
+    // Convert Firestore Timestamp to ISO string
+    const createdAtIso = createdAt?.toDate ? createdAt.toDate().toISOString() : null;
     return {
       version: data.version,
       release_notes: data.release_notes || [],
-      created_at: data.created_at,
+      created_at: createdAtIso,
     };
   });
 
