@@ -28,7 +28,7 @@ router.get("/latest", async (req: Request, res: Response) => {
   const data = doc.data();
   // Convert Firestore Timestamp to ISO string
   const createdAt = data.created_at?.toDate ? data.created_at.toDate().toISOString() : data.created_at;
-  const safeData = { ...data, created_at: createdAt };
+  const safeData = { ...data, created_at: createdAt } as Record<string, any>;
   // Strip internal fields — don't expose GCS paths or URLs
   const { gcs_path, download_url, ...rest } = safeData;
   res.json({ id: doc.id, ...rest, has_download: !!(gcs_path || download_url) });
@@ -54,7 +54,7 @@ router.get("/", async (req: Request, res: Response) => {
     const data = doc.data();
     // Convert Firestore Timestamp to ISO string
     const createdAt = data.created_at?.toDate ? data.created_at.toDate().toISOString() : data.created_at;
-    const safeData = { ...data, created_at: createdAt };
+    const safeData = { ...data, created_at: createdAt } as Record<string, any>;
     const { gcs_path, download_url, ...rest } = safeData;
     return { id: doc.id, ...rest, has_download: !!(gcs_path || download_url) };
   });
