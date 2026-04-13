@@ -67,6 +67,8 @@ router.get("/changelog", async (req: Request, res: Response) => {
   const type = req.query.type as string;
   const version = req.query.version as string;
 
+  console.log("[DEBUG] Changelog request - type:", type, "version:", version);
+
   if (!type || !["msi", "vm"].includes(type)) {
     res.status(400).json({ error: "Query param 'type' must be 'msi' or 'vm'" });
     return;
@@ -77,12 +79,17 @@ router.get("/changelog", async (req: Request, res: Response) => {
     .where("type", "==", type);
 
   if (version) {
+    console.log("[DEBUG] Adding version filter:", version);
     query = query.where("version", "==", version);
+  } else {
+    query = query.orderBy("created_at", "desc");
   }
 
-  query = query.orderBy("created_at", "desc");
+  console.log("[DEBUG] Query built, executing...");
 
   const snapshot = await query.get();
+
+  console.log("[DEBUG] Query executed, found", snapshot.size, "documents");
 
   const changelog = snapshot.docs.map((doc) => {
     const data = doc.data();
@@ -96,7 +103,7 @@ router.get("/changelog", async (req: Request, res: Response) => {
     };
   });
 
-  res.json({ type, changelog });
+  res.json({ type, version_requested: version, total_count: snapshot.size, changelog });
 });
 
 export default router;
