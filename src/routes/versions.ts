@@ -62,20 +62,27 @@ router.get("/", async (req: Request, res: Response) => {
   res.json({ releases, count: releases.length });
 });
 
-// GET /api/versions/changelog?type=msi|vm
+// GET /api/versions/changelog?type=msi|vm&version=1.0.0
 router.get("/changelog", async (req: Request, res: Response) => {
   const type = req.query.type as string;
+  const version = req.query.version as string;
 
   if (!type || !["msi", "vm"].includes(type)) {
     res.status(400).json({ error: "Query param 'type' must be 'msi' or 'vm'" });
     return;
   }
 
-  const snapshot = await db
+  let query = db
     .collection("releases")
-    .where("type", "==", type)
-    .orderBy("created_at", "desc")
-    .get();
+    .where("type", "==", type);
+
+  if (version) {
+    query = query.where("version", "==", version);
+  }
+
+  query = query.orderBy("created_at", "desc");
+
+  const snapshot = await query.get();
 
   const changelog = snapshot.docs.map((doc) => {
     const data = doc.data();
